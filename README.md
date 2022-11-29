@@ -50,7 +50,7 @@ https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/quanx.conf
   2. 在``subtitle.conf``中添加设置项：``S02E01:offset=3000``  
      **注意offset前的符号为英文冒号，此设置可以与前面的设置项共存**
   
-  部分网友反馈下载的字幕在观看时发现时快时慢，即便添加了时间轴的配置还是对不上。这种情况一般不是插件问题，而是**你下载的字幕和HBO Max的片源不匹配，建议换一个字幕组的再试试。**  
+  部分网友反馈下载的字幕时快时慢，即使配置了时间轴微调还是对不上。这种情况一般不是插件问题，而是**你下载的字幕和HBO Max的片源不匹配，建议换一个字幕组的再试试。**  
   比如The White Lotus的字幕可以从SubHD网站下载，字幕文件名格式为``The.White.Lotus.S02E01.Ciao.1080p.HMAX.WEB-DL.DD5.1.x264-NTb``，该字幕的时间轴完美匹配HBO Max片源。如果下载到的是ASS格式，可通过第三方工具将ASS转成SRT格式再使用。
 
 ## 强制1080p
