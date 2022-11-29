@@ -62,12 +62,12 @@ hostname = manifests.api.hbo.com
     2. 如果你在Mac上修改配置，请在iPhone上打开``文件``App并确认修改已云同步。
 
 ## 注意
-    - ``Subtitles``目录下的``DO_NOT_DELETE_hbomax_tv.db``请勿删除
-    - 本插件暂只支持QuanX，后续会支持Surge
-    - 本插件暂只支持电视剧，不支持电影
-    - 仅支持srt格式的字幕
-    - 字幕文件建议为utf-8编码，否则可能无法解析
-    - 本插件与DualSubs字幕插件可能存在冲突，请按需启用
+- ``Subtitles``目录下的``DO_NOT_DELETE_hbomax_tv.db``请勿删除
+- 本插件暂只支持QuanX，后续会支持Surge
+- 本插件暂只支持电视剧，不支持电影
+- 仅支持srt格式的字幕
+- 字幕文件建议为utf-8编码，否则可能无法解析
+- 本插件与DualSubs字幕插件可能存在冲突，请按需启用
 
 ## 反馈和建议
 不建议在github上提交issue，我不一定看得到。欢迎加入官方TG群组：https://t.me/+W6aJJ-p9Ir1hNmY1v
