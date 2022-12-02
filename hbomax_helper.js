@@ -47,16 +47,21 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
                 $.log('playing episode: ' + episode_id)
                 checkPlayingEpisode(episode_id)
 
-                // fix `Skip` button
-                // remove promo videos
-                root[0].body.videos = root[0].body.videos.filter(v => v.type == 'urn:video:main')
-                const main = root[0].body.videos[0]
-                // fix time offset
-                if (main.annotations && main.annotations.length) {
-                    main.annotations[0].start -= main.start
-                    main.annotations[0].end -= main.start
+                // save Re-cap duration for later use
+                let recapDuration = 0
+                for (const video of root[0].body.videos) {
+                    if (video.promoType == 'Re-Cap') {
+                        recapDuration = parseInt(video.duration * 1000)
+                        $.log(`Re-Cap duration: ${recapDuration}`)
+                        break
+                    }
                 }
-                main.start = 0
+                $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
+
+                // remove promo and Re-cap videos
+                root[0].body.videos = root[0].body.videos.filter(v => v.type == 'urn:video:main')
+                // fix offset
+                root[0].body.videos[0].start = 0
 
                 $.done({ body: JSON.stringify(root) })
             }
@@ -70,7 +75,12 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
         }
     }
     else if (/\/subtitles\/dummy\.vtt$/.test($request.url)) {
-        const offset = parseInt(getSubtitleConfig('offset') || '0')
+        let offset = parseInt(getSubtitleConfig('offset') || '0')
+        $.log('recap ' + getSubtitleConfig('recap'))
+        if (getSubtitleConfig('recap') == 'true') {
+            const recapDuration = parseInt($.getdata(`re-cap_duration@${SCRIPT_NAME}`) || '0')
+            offset -= recapDuration
+        }
         $.log(`offset = ${offset}`)
 
         // read srt content
@@ -227,12 +237,12 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
         const confBody = readICloud(`${SUBTITLES_DIR}/${series_name}/S${season}/subtitle.conf`)
         if (!confBody) return null
 
-        const m = new RegExp(`S${season}E${episode}:${key}=(.+)`, 'i').exec(confBody)
+        const m = new RegExp(`^S${season}E${episode}:${key}=(.+)`, 'im').exec(confBody)
         if (m) {
             return m[1]
         }
         else {
-            const m0 = new RegExp(`${key}=(.+)`, 'i').exec(confBody)
+            const m0 = new RegExp(`^${key}=(.+)`, 'im').exec(confBody)
             return m0 ? m0[1] : null
         }
     }
@@ -241,7 +251,7 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
         const confBody = readICloud(`${SUBTITLES_DIR}/helper.conf`)
         if (!confBody) return null
 
-        const m = new RegExp(`${key}=(.+)`, 'i').exec(confBody)
+        const m = new RegExp(`^${key}=(.+)`, 'im').exec(confBody)
         if (m) {
             return m[1]
         }
