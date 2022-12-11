@@ -30,8 +30,9 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
     const $ = Env("hbomax_helper.js")
     const SCRIPT_NAME = 'HBOMaxHelper'
     const SUBTITLES_DIR = 'Subtitles'
-    const FILENAME_TV_DB = 'DO_NOT_DELETE_hbomax_tv.db'
+    const FN_TV_DB = 'DO_NOT_DELETE_hbomax_tv.db'
     const TV_DB_THIN_DAYS = 3
+    const FN_SUB_SYNCER_DB = 'sub_syncer.db'
 
     if (/\/express-content\/urn:hbo:page:[\w\-]+:type:series\?/.test($request.url)) {
         const root = JSON.parse($response.body)
@@ -47,9 +48,13 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
                 $.log('playing episode: ' + episode_id)
                 checkPlayingEpisode(episode_id)
 
+                // create subtitle.conf if it's not there
+                createConfFile()
+
                 // save Re-cap duration for later use
                 let recapDuration = 0
-                for (const video of root[0].body.videos) {
+                const videos = root[0].body.videos
+                for (const video of videos) {
                     if (video.promoType == 'Re-Cap') {
                         recapDuration = parseInt(video.duration * 1000)
                         $.log(`Re-Cap duration: ${recapDuration}`)
@@ -59,9 +64,17 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
                 $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
 
                 // remove promo and Re-cap videos
-                root[0].body.videos = root[0].body.videos.filter(v => v.type == 'urn:video:main')
+                videos = videos.filter(v => v.type == 'urn:video:main')
                 // fix offset
-                root[0].body.videos[0].start = 0
+                videos[0].start = 0
+                const annotation = videos[0].annotations[0]
+                annotation.end -= annotation.start
+                annotation.start = 0
+
+                // save manifest for sub syncer
+                if (getSubtitleConfig('subsyncer.enabled') == 'true') {
+                    writeSubSyncerDB(root[0].body.manifest)
+                }
 
                 $.done({ body: JSON.stringify(root) })
             }
@@ -76,7 +89,7 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
     }
     else if (/\/subtitles\/dummy\.vtt$/.test($request.url)) {
         let offset = parseInt(getSubtitleConfig('offset') || '0')
-        $.log('recap ' + getSubtitleConfig('recap'))
+        $.log('recap = ' + (getSubtitleConfig('recap') || 'false'))
         if (getSubtitleConfig('recap') == 'true') {
             const recapDuration = parseInt($.getdata(`re-cap_duration@${SCRIPT_NAME}`) || '0')
             offset -= recapDuration
@@ -157,7 +170,7 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
     function readTVDB() {
         let root
         try {
-            const body = readICloud(`${SUBTITLES_DIR}/${FILENAME_TV_DB}`)
+            const body = readICloud(`${SUBTITLES_DIR}/${FN_TV_DB}`)
             if (body) {
                 root = JSON.parse(body)
             }
@@ -176,10 +189,43 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
         )
 
         // write to iCloud
-        const path = `${SUBTITLES_DIR}/${FILENAME_TV_DB}`
-        const buffer = new TextEncoder().encode(JSON.stringify(newData))
-        if (!$iCloud.writeFile(buffer, path)) {
-            console.log(`iCloud file write failed, path: ${path}`)
+        const path = `${SUBTITLES_DIR}/${FN_TV_DB}`
+        writeICloud(path, JSON.stringify(newData))
+    }
+
+    function writeSubSyncerDB(manifest_url) {
+        const series_name = $.getdata(`series_name@${SCRIPT_NAME}`)
+        const season = $.getdata(`season_no@${SCRIPT_NAME}`)
+        const episode = $.getdata(`ep_no@${SCRIPT_NAME}`)
+        if (!series_name) return
+
+        const path = `${SUBTITLES_DIR}/${series_name}/${FN_SUB_SYNCER_DB}`
+
+        // read
+        let root
+        try {
+            const body = readICloud(path)
+            if (body) {
+                root = JSON.parse(body)
+            }
+        }
+        catch (e) {
+            $.log(e)
+        }
+        if (!root) {
+            root = { 'manifests': {} }
+        }
+        else if (root['manifests'][`S${season}E${episode}`]) {
+            // 不进行覆盖，防止错误数据写入导致数据混乱
+            return
+        }
+
+        // update
+        root['manifests'][`S${season}E${episode}`] = manifest_url
+
+        // write
+        if (writeICloud(path, JSON.stringify(root))) {
+            notify(SCRIPT_NAME, '播放记录已写入本地数据库', `[${series_name}] S${season}E${episode}`)
         }
     }
 
@@ -193,10 +239,14 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
             notify(SCRIPT_NAME, '正在播放剧集', `[${item[0]}] S${item[1]}E${item[2]}`)
         }
         else {
-            $.setdata('', `series_name@${SCRIPT_NAME}`)
-            $.setdata('', `season_no@${SCRIPT_NAME}`)
-            $.setdata('', `ep_no@${SCRIPT_NAME}`)
+            clearPlaying()
         }
+    }
+
+    function clearPlaying() {
+        $.setdata('', `series_name@${SCRIPT_NAME}`)
+        $.setdata('', `season_no@${SCRIPT_NAME}`)
+        $.setdata('', `ep_no@${SCRIPT_NAME}`)
     }
 
     function saveEpisodes(root) {
@@ -225,9 +275,23 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
 
     function notify(title, subtitle, message) {
         const enabled = getScriptConfig('notify') || 'true'
-        if (enabled.toLowerCase() == 'true') {
+        if (enabled == 'true') {
             $.msg(title, subtitle, message)
         }
+    }
+
+    function createConfFile() {
+        const series_name = $.getdata(`series_name@${SCRIPT_NAME}`)
+        const season = $.getdata(`season_no@${SCRIPT_NAME}`)
+        if (!series_name) return
+
+        const path = `${SUBTITLES_DIR}/${series_name}/S${season}/subtitle.conf`
+        if (checkICloudExists(path)) return
+
+        const content = `offset=0
+subsyncer.enabled=false
+        `
+        writeICloud(path, content)
     }
 
     function getSubtitleConfig(key) {
@@ -237,13 +301,13 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
         const confBody = readICloud(`${SUBTITLES_DIR}/${series_name}/S${season}/subtitle.conf`)
         if (!confBody) return null
 
-        const m = new RegExp(`^S${season}E${episode}:${key}=(.+)`, 'im').exec(confBody)
+        const m = new RegExp(String.raw`^\s*S${season}E${episode}:${key}\s*=\s*(.+)`, 'im').exec(confBody)
         if (m) {
-            return m[1]
+            return m[1].trim()
         }
         else {
-            const m0 = new RegExp(`^${key}=(.+)`, 'im').exec(confBody)
-            return m0 ? m0[1] : null
+            const m0 = new RegExp(String.raw`^\s*${key}\s*=\s*(.+)`, 'im').exec(confBody)
+            return m0 && m0[1].trim()
         }
     }
 
@@ -251,11 +315,8 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
         const confBody = readICloud(`${SUBTITLES_DIR}/helper.conf`)
         if (!confBody) return null
 
-        const m = new RegExp(`^${key}=(.+)`, 'im').exec(confBody)
-        if (m) {
-            return m[1]
-        }
-        return null
+        const m = new RegExp(String.raw`^\s*${key}\s*=\s*(.+)`, 'im').exec(confBody)
+        return m && m[1].trim()
     }
 
     function numberWithCommas(x) {
@@ -291,8 +352,11 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
         const season = $.getdata(`season_no@${SCRIPT_NAME}`)
         const episode = $.getdata(`ep_no@${SCRIPT_NAME}`)
         const path = `${SUBTITLES_DIR}/${series_name}/S${season}/S${season}E${episode}.srt`
-        $.log(path)
-        return checkICloudExists(path)
+        const found = checkICloudExists(path)
+        if (!found) {
+            $.log(`subtitle not exist: ${path}`)
+        }
+        return found
     }
 
     function getSubtitle() {
@@ -313,6 +377,15 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
             const content = new TextDecoder().decode(data)
             return content
         }
+    }
+
+    function writeICloud(path, content) {
+        const buffer = new TextEncoder().encode(content)
+        if (!$iCloud.writeFile(buffer, path)) {
+            console.log(`iCloud file write failed, path: ${path}`)
+            return false
+        }
+        return true
     }
 
     function checkICloudExists(path) {
