@@ -2,7 +2,7 @@
 @author: liunice
 @decription: HBO Max iOS 外挂字幕和强制1080p插件
 @created: 2022-11-29
-@updated: 2022-11-29
+@updated: 2022-12-12
 */
 
 /*
@@ -33,6 +33,7 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
     const FN_TV_DB = 'DO_NOT_DELETE_hbomax_tv.db'
     const TV_DB_THIN_DAYS = 3
     const FN_SUB_SYNCER_DB = 'sub_syncer.db'
+    const PLATFORM_NAME = 'hbomax'
 
     if (/\/express-content\/urn:hbo:page:[\w\-]+:type:series\?/.test($request.url)) {
         const root = JSON.parse($response.body)
@@ -40,50 +41,50 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
         $.done({})
     }
     else if (/comet\.api\.hbo\.com\/content$/.test($request.url)) {
-        try {
-            const root = JSON.parse($response.body)
-            if (root.length && root[0].body && root[0].body.videos && root[0].body.containerType == 'HLS' && root[0].id.includes(':episode:')) {
-                // check playing episode
-                const episode_id = root[0].id.split(':').pop()
-                $.log('playing episode: ' + episode_id)
-                checkPlayingEpisode(episode_id)
+        const root = JSON.parse($response.body)
+        if (root.length && root[0].body && root[0].body.videos && root[0].body.containerType == 'HLS' && root[0].id.includes(':episode:')) {
+            // check playing episode
+            const episode_id = root[0].id.split(':').pop()
+            $.log('playing episode: ' + episode_id)
+            checkPlayingEpisode(episode_id)
 
-                // create subtitle.conf if it's not there
+            // create subtitle.conf if it's not there
+            if (getScriptConfig('auto.create') !== 'false') {
                 createConfFile()
+            }
 
-                // save Re-cap duration for later use
-                let recapDuration = 0
-                const videos = root[0].body.videos
-                for (const video of videos) {
-                    if (video.promoType == 'Re-Cap') {
-                        recapDuration = parseInt(video.duration * 1000)
-                        $.log(`Re-Cap duration: ${recapDuration}`)
-                        break
-                    }
+            // save Re-cap duration for later use
+            let recapDuration = 0
+            const videos = root[0].body.videos
+            for (const video of videos) {
+                if (video.promoType == 'Re-Cap') {
+                    recapDuration = parseInt(video.duration * 1000)
+                    $.log(`Re-Cap duration: ${recapDuration}`)
+                    break
                 }
-                $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
+            }
+            $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
 
-                // remove promo and Re-cap videos
-                videos = videos.filter(v => v.type == 'urn:video:main')
-                // fix offset
-                videos[0].start = 0
-                const annotation = videos[0].annotations[0]
+            // remove promo and Re-cap videos
+            root[0].body.videos = videos.filter(v => v.type == 'urn:video:main')
+            // fix offset
+            const main = root[0].body.videos[0]
+            main.start = 0
+            if (main.annotations && main.annotations.length) {
+                const annotation = main.annotations[0]
                 annotation.end -= annotation.start
                 annotation.start = 0
-
-                // save manifest for sub syncer
-                if (getSubtitleConfig('subsyncer.enabled') == 'true') {
-                    writeSubSyncerDB(root[0].body.manifest)
-                }
-
-                $.done({ body: JSON.stringify(root) })
             }
-            else {
-                $.done({})
+
+            // save manifest for sub syncer
+            if (getSubtitleConfig('subsyncer.enabled') == 'true') {
+                writeSubSyncerDB(root[0].body.manifest)
             }
+
+            $.done({ body: JSON.stringify(root) })
         }
-        catch (e) {
-            $.log(e)
+        else {
+            clearPlaying()
             $.done({})
         }
     }
@@ -109,14 +110,13 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
         $.log(vttBody)
 
         // return response
-        var newHeaders = $request.headers
-        newHeaders['Content-Type'] = 'application/vnd.apple.mpegurl'
-        if ($.isQuanX()) {
-            $.done({ body: vttBody, headers: newHeaders, status: 'HTTP/1.1 200 OK' })
-        }
-        else {
-            $.done({ body: vttBody, headers: newHeaders, status: 200 })
-        }
+        const headers = $response.headers
+        headers['Content-Type'] = 'application/vnd.apple.mpegurl'
+        $.done({ 
+            body: vttBody, 
+            headers: headers, 
+            status: $.isQuanX() ? 'HTTP/1.1 200 OK' : 200 
+        })
     }
     else if (/manifests\.api\.hbo\.com\/hls\.m3u8\?f\.audioTrack=.*?&r.origin=cmaf/.test($request.url)) {
         let body = $response.body
@@ -213,7 +213,14 @@ https://manifests.api.hbo.com/subtitles/dummy.vtt
             $.log(e)
         }
         if (!root) {
-            root = { 'manifests': {} }
+            root = {
+                'manifests': {},
+                'platform': PLATFORM_NAME
+            }
+        }
+        else if (root['platform'] && root['platform'] != PLATFORM_NAME) {
+            // 不允许不同平台的数据混在一起
+            return
         }
         else if (root['manifests'][`S${season}E${episode}`]) {
             // 不进行覆盖，防止错误数据写入导致数据混乱
