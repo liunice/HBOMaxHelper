@@ -42,53 +42,68 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
     }
     else if (/comet\.api\.hbo\.com\/content$/.test($request.url)) {
         const root = JSON.parse($response.body)
-        if (root.length && root[0].body && root[0].body.videos && root[0].body.containerType == 'HLS' && root[0].id.includes(':episode:')) {
-            // check playing episode
-            const episode_id = root[0].id.split(':').pop()
-            $.log('playing episode: ' + episode_id)
-            checkPlayingEpisode(episode_id)
+        if (root.length && root[0].body && root[0].body.videos && root[0].body.containerType == 'HLS') {
+            if (root[0].id.includes(':episode:')) {
+                // check playing episode
+                const episode_id = root[0].id.split(':').pop()
+                $.log('playing episode: ' + episode_id)
+                checkPlayingEpisode(episode_id)
 
-            // create subtitle.conf if it's not there
-            if (getScriptConfig('auto.create') !== 'false') {
-                createConfFile()
-            }
-
-            // save Re-cap duration for later use
-            let recapDuration = 0
-            const videos = root[0].body.videos
-            for (const video of videos) {
-                if (video.promoType == 'Re-Cap') {
-                    recapDuration = parseInt(video.duration * 1000)
-                    $.log(`Re-Cap duration: ${recapDuration}`)
-                    break
+                // create subtitle.conf if it's not there
+                if (getScriptConfig('auto.create') !== 'false') {
+                    createConfFile()
                 }
-            }
-            $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
 
-            // remove promo and Re-cap videos
-            root[0].body.videos = videos.filter(v => v.type == 'urn:video:main')
-            // fix offset
-            const main = root[0].body.videos[0]
-            main.start = 0
-            if (main.annotations && main.annotations.length) {
-                const annotation = main.annotations[0]
-                annotation.end -= annotation.start
-                annotation.start = 0
-            }
+                // save Re-cap duration for later use
+                let recapDuration = 0
+                const videos = root[0].body.videos
+                for (const video of videos) {
+                    if (video.promoType == 'Re-Cap') {
+                        recapDuration = parseInt(video.duration * 1000)
+                        $.log(`Re-Cap duration: ${recapDuration}`)
+                        break
+                    }
+                }
+                $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
 
-            // save manifest for sub syncer
-            if (getSubtitleConfig('subsyncer.enabled') == 'true') {
-                writeSubSyncerDB(root[0].body.manifest)
-            }
+                // remove promo and Re-cap videos
+                root[0].body.videos = videos.filter(v => v.type == 'urn:video:main')
+                const main = root[0].body.videos[0]
+                // fix offset
+                main.start = 0
+                // if (main.annotations && main.annotations.length) {
+                //     const annotation = main.annotations[0]
+                //     annotation.end -= annotation.start
+                //     annotation.start = 0
+                // }
+                // remove `skip` buttons
+                delete main['annotations']
 
-            $.done({ body: JSON.stringify(root) })
+                // save manifest for sub syncer
+                if (getSubtitleConfig('subsyncer.enabled') == 'true') {
+                    writeSubSyncerDB(root[0].body.manifest)
+                }
+
+                $.done({ body: JSON.stringify(root) })
+            }
+            else {
+                clearPlaying()
+                $.done({})
+            }
         }
         else {
-            clearPlaying()
             $.done({})
         }
     }
     else if (/\/subtitles\/dummy\.vtt$/.test($request.url)) {
+        // read srt content
+        const srtBody = getSubtitle()
+        if (!srtBody) {
+            $.done({})
+            return
+        }
+
+        // get offset
         let offset = parseInt(getSubtitleConfig('offset') || '0')
         $.log('recap = ' + (getSubtitleConfig('recap') || 'false'))
         if (getSubtitleConfig('recap') == 'true') {
@@ -96,9 +111,6 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
             offset -= recapDuration
         }
         $.log(`offset = ${offset}`)
-
-        // read srt content
-        const srtBody = getSubtitle()
 
         // generate webvtt
         var vttBody = 'WEBVTT\r\n\r\n'
