@@ -2,7 +2,7 @@
 @author: liunice
 @decription: HBO Max iOS 外挂字幕和强制1080p插件
 @created: 2022-11-29
-@updated: 2022-12-12
+@updated: 2023-05-31
 */
 
 /*
@@ -12,13 +12,14 @@
 TG官方群: https://t.me/+W6aJJ-p9Ir1hNmY1
 
 QuanX用法：
-hostname = manifests.api.hbo.com, comet.api.hbo.com
+hostname = manifests.api.hbo.com, comet*.api.hbo.com
 
 以下功能请按需启用：
 
 # 外挂srt字幕 (外挂字幕方法请参见github主页)
-^https:\/\/comet\.api\.hbo\.com\/express-content\/urn:hbo:page:[\w\-]+:type:series\? url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
-^https:\/\/comet\.api\.hbo\.com\/content$  url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
+^https:\/\/comet.*\.api\.hbo\.com\/express-content\/urn:hbo:page:[\w\-]+:type:series\? url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
+^https:\/\/comet.*\.api\.hbo\.com\/content$  url script-request-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
+^https:\/\/comet.*\.api\.hbo\.com\/content$  url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
 ^https:\/\/manifests\.api\.hbo\.com\/hlsMedia\.m3u8\?r\.host=.*?(t|a|v)\d+\.m3u8&r\.origin=cmaf url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
 ^https:\/\/manifests\.api\.hbo\.com\/subtitles\/dummy\.vtt$ url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
 
@@ -40,56 +41,56 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
         saveEpisodes(root)
         $.done({})
     }
-    else if (/comet\.api\.hbo\.com\/content$/.test($request.url)) {
+    else if (!$response && /https:\/\/comet.*\.api\.hbo\.com\/content$/.test($request.url)) {
+        const root = JSON.parse($request.body)
+        if (Array.isArray(root) && root.length && root[0].headers && root[0].headers['x-hbo-video-initiated-time']) {
+            // check playing episode
+            const episode_id = root[0].id.split(':').pop()
+            $.log('playing episode: ' + episode_id)
+            checkPlayingEpisode(episode_id)
+
+            // create subtitle.conf if it's not there
+            if (getScriptConfig('auto.create') !== 'false') {
+                createConfFile()
+            }
+        }
+
+        $.done({})
+    }
+    else if ($response && /https:\/\/comet.*\.api\.hbo\.com\/content$/.test($request.url)) {
         const root = JSON.parse($response.body)
-        if (root.length && root[0].body && root[0].body.videos && root[0].body.containerType == 'HLS') {
-            if (root[0].id.includes(':episode:')) {
-                // check playing episode
-                const episode_id = root[0].id.split(':').pop()
-                $.log('playing episode: ' + episode_id)
-                checkPlayingEpisode(episode_id)
-
-                // create subtitle.conf if it's not there
-                if (getScriptConfig('auto.create') !== 'false') {
-                    createConfFile()
+        if (Array.isArray(root) && root.length && root[0].body && root[0].body.manifest && root[0].body.videos) {
+            // save Re-cap duration for later use
+            let recapDuration = 0
+            const videos = root[0].body.videos
+            for (const video of videos) {
+                if (video.promoType == 'Re-Cap') {
+                    recapDuration = parseInt(video.duration * 1000)
+                    $.log(`Re-Cap duration: ${recapDuration}`)
+                    break
                 }
-
-                // save Re-cap duration for later use
-                let recapDuration = 0
-                const videos = root[0].body.videos
-                for (const video of videos) {
-                    if (video.promoType == 'Re-Cap') {
-                        recapDuration = parseInt(video.duration * 1000)
-                        $.log(`Re-Cap duration: ${recapDuration}`)
-                        break
-                    }
-                }
-                $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
-
-                // remove promo and Re-cap videos
-                root[0].body.videos = videos.filter(v => v.type == 'urn:video:main')
-                const main = root[0].body.videos[0]
-                // fix offset
-                main.start = 0
-                // if (main.annotations && main.annotations.length) {
-                //     const annotation = main.annotations[0]
-                //     annotation.end -= annotation.start
-                //     annotation.start = 0
-                // }
-                // remove `skip` buttons
-                delete main['annotations']
-
-                // save manifest for sub syncer
-                if (getSubtitleConfig('subsyncer.enabled') == 'true') {
-                    writeSubSyncerDB(root[0].body.manifest)
-                }
-
-                $.done({ body: JSON.stringify(root) })
             }
-            else {
-                clearPlaying()
-                $.done({})
+            $.setdata(recapDuration.toString(), `re-cap_duration@${SCRIPT_NAME}`)
+
+            // remove promo and Re-cap videos
+            root[0].body.videos = videos.filter(v => v.type == 'urn:video:main')
+            const main = root[0].body.videos[0]
+            // fix offset
+            main.start = 0
+            // if (main.annotations && main.annotations.length) {
+            //     const annotation = main.annotations[0]
+            //     annotation.end -= annotation.start
+            //     annotation.start = 0
+            // }
+            // remove `skip` buttons
+            delete main['annotations']
+
+            // save manifest for sub syncer
+            if (getSubtitleConfig('subsyncer.enabled') == 'true') {
+                writeSubSyncerDB(root[0].body.manifest)
             }
+
+            $.done({ body: JSON.stringify(root) })
         }
         else {
             $.done({})
@@ -124,10 +125,10 @@ hostname = manifests.api.hbo.com, comet.api.hbo.com
         // return response
         const headers = $response.headers
         headers['Content-Type'] = 'application/vnd.apple.mpegurl'
-        $.done({ 
-            body: vttBody, 
-            headers: headers, 
-            status: $.isQuanX() ? 'HTTP/1.1 200 OK' : 200 
+        $.done({
+            body: vttBody,
+            headers: headers,
+            status: $.isQuanX() ? 'HTTP/1.1 200 OK' : 200
         })
     }
     else if (/manifests\.api\.hbo\.com\/hls\.m3u8\?f\.audioTrack=.*?&r.origin=cmaf/.test($request.url)) {

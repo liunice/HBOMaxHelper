@@ -19,11 +19,12 @@ https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/quanx.conf
 - ### QuanX配置
   单独开启外挂字幕功能的配置如下：
   ```
-  hostname = manifests.api.hbo.com, comet.api.hbo.com
+  hostname = manifests.api.hbo.com, comet*.api.hbo.com
 
-  # 外挂srt字幕 manifests.api.hbo.com, comet.api.hbo.com
-  ^https:\/\/comet\.api\.hbo\.com\/express-content\/urn:hbo:page:[\w\-]+:type:series\? url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
-  ^https:\/\/comet\.api\.hbo\.com\/content$  url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
+  # 外挂srt字幕 manifests.api.hbo.com, comet*.api.hbo.com
+  ^https:\/\/comet.*\.api\.hbo\.com\/express-content\/urn:hbo:page:[\w\-]+:type:series\? url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
+  ^https:\/\/comet.*\.api\.hbo\.com\/content$  url script-request-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
+  ^https:\/\/comet.*\.api\.hbo\.com\/content$  url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
   ^https:\/\/manifests\.api\.hbo\.com\/hlsMedia\.m3u8\?r\.host=.*?(t|a|v)\d+\.m3u8&r\.origin=cmaf url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
   ^https:\/\/manifests\.api\.hbo\.com\/subtitles\/dummy\.vtt$ url script-response-body https://raw.githubusercontent.com/liunice/HBOMaxHelper/master/hbomax_helper.js
   ```
@@ -85,7 +86,7 @@ hostname = manifests.api.hbo.com
 ## 注意
 
 - ``Subtitles``目录下的``DO_NOT_DELETE_hbomax_tv.db``请勿删除
-- 本插件暂只支持QuanX，后续会支持Surge
+- 本插件暂只支持QuanX
 - 本插件暂只支持电视剧，不支持电影
 - 仅支持srt格式的字幕
 - 字幕文件建议为utf-8编码，否则可能无法解析
